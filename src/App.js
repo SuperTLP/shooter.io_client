@@ -4,11 +4,12 @@ import './App.css';
 import './stylesheet.css'
 import {Howl, Howler} from 'howler'
 const ownName = "me"
-
+let meProperties;
+let players =[]
 const Player = ({app}) => {
   let me = app.state.positions.me
   return (
-    <div className="player" id="player" style={{top: me.top+"px", left: me.left+"px", transform: `rotateZ(${me.rotation}deg)`}}>
+    <div className="player" id="player" style={{top: me.offset_top+"px", left: me.offset_left+"px", transform: `rotateZ(${me.rotation}deg)`}}>
   <div className="pipe">
   <div className="shot-entry-point" id="shot"></div>
   </div>
@@ -31,10 +32,11 @@ class App extends React.Component {
       pressedKeys: [],
       update: 0,
       shots: [],
+      players: [],
       positions: {
         me: {
-          left: 500,
-          top: 500,
+          offset_left: 500,
+          offset_top: 500,
           rotation: 30
         }
       }
@@ -63,9 +65,6 @@ class App extends React.Component {
     })
   }
   handleClick() {
-
-
-
     let audio = new Howl ({
       src:['gunshot_1.mp3']
     })
@@ -101,11 +100,34 @@ class App extends React.Component {
     return shots
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   componentDidMount() {
+      meProperties = {
+      name: ownName,
+      offset_left: 500,
+      offset_top: 500,
+      rotation: 0,
+      health: 100
+    }
+
     fetch("/players", {
-    headers: {'Content-Type': 'application/json'}, 
-    method:"post", 
-    body: JSON.stringify({a:1, b:2})})
+      headers: {'Content-Type': 'application/json'},
+      method: "post",
+      body: JSON.stringify(meProperties)
+    })
 
     let backgroundMusic = new Howl({
       src: ["background_music_1.mp3"],
@@ -114,14 +136,27 @@ class App extends React.Component {
     })
 
     let map = {
-      "w": ["top", -5],
-      "a": ["left", -5],
-      "s": ["top", 5],
-      "d": ["left", 5]
+      "w": ["offset_top", -5],
+      "a": ["offset_left", -5],
+      "s": ["offset_top", 5],
+      "d": ["offset_left", 5]
     }
+
     let elem = document.getElementById("player")
     let elemWidth = getComputedStyle(elem).width
+
+
     let game = window.setInterval(() => {
+      let getPromise = fetch("/players", {
+        method: "get"
+      }).then((response) => {return response.json()})
+      .then(data => {
+        players = data
+      })
+      let filteredPlayers=players.filter(player => player.name===ownName)[0]
+      if (filteredPlayers!==undefined) {
+        meProperties=filteredPlayers
+      }
 
       let shots = this.state.shots.filter((shot) => {
         let x = shot.currentX
@@ -139,40 +174,56 @@ class App extends React.Component {
         return shot
       })
       //rotation setting starts
-      let x = this.state.mouseX-this.state.positions.me.left-0.5*parseInt(elemWidth);
-      let y = this.state.mouseY-this.state.positions.me.top-0.5*parseInt(elemWidth)
+      let x = this.state.mouseX-this.state.positions.me.offset_left-0.5*parseInt(elemWidth);
+      let y = this.state.mouseY-this.state.positions.me.offset_top-0.5*parseInt(elemWidth)
       let rotation = (Math.atan2(y, x)/Math.PI)*180+90
-      //rotation setting ends
-
+      meProperties.rotation=rotation
       let oldMe=this.state.positions.me
       oldMe["rotation"]=rotation
       let oldPositions=this.state.positions
       oldPositions["me"]=oldMe
 
       this.state.pressedKeys.forEach(key => {
-
         if (Object.keys(map).includes(key) && this.state.positions.me[map[key][0]]+map[key][1]>=-20) {
+          meProperties[map[key][0]]+=map[key][1]
           oldMe[map[key][0]]+=map[key][1]
+          meProperties[map[key][0]]+=map[key][1]
         }
       });
+      console.log(meProperties.offset_left)
+      fetch("/players", {
+        headers: {'Content-Type': 'application/json'},
+        method: "put",
+        body: JSON.stringify(meProperties)
+      })
       this.setState({
         positions: oldPositions,
-        shots: newShots
+        shots: newShots,
+        players: players
       })
-    }, 16)
+    }, 100)
   }
+
+
+
+
+
+
+
+
   logOut() {
+
+    fetch("/players", {
+      headers: {'Content-Type': 'application/json'}, 
+      method:"delete",
+      body: JSON.stringify({name: ownName})})
   }
+
   render() {
     window.onkeyup = (e) => this.handleKeyRelease(e)
     window.onkeydown = (e) => this.handleKeyPress(e)
     window.onmousemove= (e) => this.handleMouseMove(e)
-    window.onbeforeunload = () => {
-      fetch("/players", {
-        headers: {'Content-Type': 'application/json'}, 
-        method:"post", 
-        body: JSON.stringify({a:1, b:"logout"})})
-    }
+    window.onbeforeunload= () => this.logOut()
     window.onclick=  this.handleClick.bind(this)
     let shots = this.renderShots()
     return (
