@@ -3,12 +3,15 @@ import logo from './logo.svg';
 import './App.css';
 import './stylesheet.css'
 import {Howl, Howler} from 'howler'
-const ownName = "me"
+import io from 'socket.io-client'
+const socket = io("http://localhost:5000")
 
-const Player = ({app}) => {
-  let me = app.state.positions.me
+
+const ownName = JSON.stringify(Math.floor(Math.random()*1000))
+//test
+const Player = ({player}) => {
   return (
-    <div className="player" id="player" style={{top: me.top+"px", left: me.left+"px", transform: `rotateZ(${me.rotation}deg)`}}>
+    <div className="player" id="player" style={{top: player.offset_top+"px", left: player.offset_left+"px", transform: `rotateZ(${player.rotation}deg)`}}>
   <div className="pipe">
   <div className="shot-entry-point" id="shot"></div>
   </div>
@@ -31,13 +34,7 @@ class App extends React.Component {
       pressedKeys: [],
       update: 0,
       shots: [],
-      positions: {
-        me: {
-          left: 500,
-          top: 500,
-          rotation: 30
-        }
-      }
+      players: [{name: ownName, offset_left: 500, offset_top: 500, rotation: 0, health:100}]
     }
   }
   handleKeyPress(e) {
@@ -63,19 +60,16 @@ class App extends React.Component {
     })
   }
   handleClick() {
-
-
-
+    let me = this.state.players.filter(player=>player.name===ownName)[0]
     let audio = new Howl ({
       src:['gunshot_1.mp3']
     })
     audio.play()
-    let shots = this.state.shots
     let startingPoint = document.getElementById("shot").getBoundingClientRect();
     let shot = {
       currentX: startingPoint.x, 
       currentY: startingPoint.y, 
-      ratio: Math.abs(Math.tan(((this.state.positions.me.rotation-90)/180)*Math.PI)),
+      ratio: Math.abs(Math.tan(((me.rotation-90)/180)*Math.PI)),
       xDirection: 1,
       yDirection: 1
     }
@@ -85,14 +79,11 @@ class App extends React.Component {
     if (this.state.mouseY-startingPoint.y<0) {
       shot.yDirection=-1
     }
-    shots.push(shot)
-    this.setState({
-      shots: shots
-    })
+    socket.emit("shoot", shot)
   }
   renderShots() {
     let shots = this.state.shots.map((shot) => {
-      return (<div className="shot" key={shot.currentX} style={{
+      return (<div className="shot" key={Math.floor(Math.random()*100000)} style={{
         position: "absolute",
         left: shot.currentX,
         top: shot.currentY
@@ -102,11 +93,26 @@ class App extends React.Component {
   }
 
   componentDidMount() {
-    fetch("/players", {
-    headers: {'Content-Type': 'application/json'}, 
-    method:"post", 
-    body: JSON.stringify({a:1, b:2})})
-
+    socket.on("player", (data) => {
+      let newPlayers = this.state.players
+      if (newPlayers.some(item => item.name===data.name)){
+        let index = newPlayers.findIndex(player => player.name===data.name)
+        newPlayers[index]=data
+      } else {
+        newPlayers.push(data)
+      }
+      this.setState({
+        players: newPlayers
+      })
+    })
+    socket.on("shoot", (data) => {
+      let oldShots = this.state.shots
+      oldShots.push(data)
+      this.setState({
+        shots: oldShots
+      })
+    })
+    
     let backgroundMusic = new Howl({
       src: ["background_music_1.mp3"],
       volume: 0.1,
@@ -114,14 +120,17 @@ class App extends React.Component {
     })
 
     let map = {
-      "w": ["top", -5],
-      "a": ["left", -5],
-      "s": ["top", 5],
-      "d": ["left", 5]
+      "w": ["offset_top", -5],
+      "a": ["offset_left", -5],
+      "s": ["offset_top", 5],
+      "d": ["offset_left", 5]
     }
     let elem = document.getElementById("player")
     let elemWidth = getComputedStyle(elem).width
+
     let game = window.setInterval(() => {
+
+      let currentMe = this.state.players.filter((player) => player.name===ownName)[0]
 
       let shots = this.state.shots.filter((shot) => {
         let x = shot.currentX
@@ -129,7 +138,6 @@ class App extends React.Component {
         return (x<window.innerWidth&&x>=0 && y>0 &&y>0 && y<window.innerHeight)
       })
       let newShots = shots.map((shot) => {
-
         /*tangent is very high when aiming directly up (limit to infinity). 
         this caused shots to travel faster directly up. multiplier fixes this problem. */
         let multiplier = Math.sqrt(shot.ratio**2+1)/(shot.ratio**2+1)
@@ -139,27 +147,31 @@ class App extends React.Component {
         return shot
       })
       //rotation setting starts
-      let x = this.state.mouseX-this.state.positions.me.left-0.5*parseInt(elemWidth);
-      let y = this.state.mouseY-this.state.positions.me.top-0.5*parseInt(elemWidth)
+      let x = this.state.mouseX-currentMe.offset_left-0.5*parseInt(elemWidth);
+      let y = this.state.mouseY-currentMe.offset_top-0.5*parseInt(elemWidth)
       let rotation = (Math.atan2(y, x)/Math.PI)*180+90
-      //rotation setting ends
-
-      let oldMe=this.state.positions.me
-      oldMe["rotation"]=rotation
-      let oldPositions=this.state.positions
-      oldPositions["me"]=oldMe
+      currentMe.rotation=rotation
 
       this.state.pressedKeys.forEach(key => {
 
-        if (Object.keys(map).includes(key) && this.state.positions.me[map[key][0]]+map[key][1]>=-20) {
-          oldMe[map[key][0]]+=map[key][1]
+        if (Object.keys(map).includes(key) && currentMe[map[key][0]]+map[key][1]>=-20) {
+          currentMe[map[key][0]]+=map[key][1]
         }
       });
+      let newPlayers=this.state.players
+      let index=this.state.players.findIndex(element => element.name===ownName)
+      newPlayers[index]=currentMe
+      socket.emit("player", currentMe)
       this.setState({
-        positions: oldPositions,
-        shots: newShots
+        shots:newShots
       })
-    }, 16)
+    }, 1000/50)
+  }
+  renderPlayers() {
+    let res = this.state.players.map(player => {
+      return <Player player={player}/>
+    })
+    return res
   }
   logOut() {
   }
@@ -167,17 +179,12 @@ class App extends React.Component {
     window.onkeyup = (e) => this.handleKeyRelease(e)
     window.onkeydown = (e) => this.handleKeyPress(e)
     window.onmousemove= (e) => this.handleMouseMove(e)
-    window.onbeforeunload = () => {
-      fetch("/players", {
-        headers: {'Content-Type': 'application/json'}, 
-        method:"post", 
-        body: JSON.stringify({a:1, b:"logout"})})
-    }
     window.onclick=  this.handleClick.bind(this)
     let shots = this.renderShots()
+    let players = this.renderPlayers()
     return (
       <div className="App">
-      <Player app={this}/>
+      {players}
       {shots}
       </div>
     )
